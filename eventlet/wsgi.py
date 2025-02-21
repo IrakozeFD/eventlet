@@ -605,6 +605,8 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
 
         try:
             try:
+                towrite = []
+                towrite_size = 0
                 WSGI_LOCAL.already_handled = False
                 result = self.application(self.environ, start_response)
 
@@ -619,8 +621,6 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
                         # response, so we can be nice and send a Connection: close header.
                         self.close_connection = 1
 
-                towrite = []
-                towrite_size = 0
                 just_written_size = 0
                 minimum_write_chunk_size = int(self.environ.get(
                     'eventlet.minimum_write_chunk_size', self.minimum_chunk_size))
@@ -649,6 +649,13 @@ class HttpProtocol(BaseHTTPServer.BaseHTTPRequestHandler):
                 self.close_connection = 1
                 tb = traceback.format_exc()
                 self.server.log.info(tb)
+                # The data gathering process encountered an error,
+                # and the buffer may be partially filled.
+                # The goal here is to write the data collected before the error
+                # occurred if it exists.
+                if towrite:
+                    just_written_size = towrite_size
+                    write(b''.join(towrite))
                 if not headers_sent:
                     err_body = tb.encode() if self.server.debug else b''
                     start_response("500 Internal Server Error",
